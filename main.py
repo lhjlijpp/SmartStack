@@ -6,7 +6,7 @@ import uvicorn
 app = FastAPI()
 
 # Get API key from environment variable
-API_KEY = os.getenv("API_KEY")  # Ensure the API key is properly set as an environment variable
+API_KEY = os.getenv("TWELVE_API_KEY")  # Ensure the API key is properly set as an environment variable
 
 @app.get("/")
 def read_root():
