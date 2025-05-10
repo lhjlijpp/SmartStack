@@ -1,92 +1,83 @@
 import os
-import time
-import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+import requests
+from datetime import datetime, timedelta
 import uvicorn
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-API_KEY = os.getenv("TWELVE_API_KEY")
+API_KEY = os.getenv("TWELVE_API_KEY")  # Your Twelve Data API key
 
-# Cache
-cache = {
-    "timestamp": 0,
-    "signal": "HOLD",
-    "price": "Unavailable",
-    "prices": [],
-    "pair": "EUR/USD"
-}
-
+# Strategy: Simple Moving Average (SMA) Crossover
 def calculate_signal(prices):
-    short = 5
-    long = 20
-    if len(prices) < long:
-        return "HOLD"
-    short_avg = sum(prices[:short]) / short
-    long_avg = sum(prices[:long]) / long
-    if short_avg > long_avg:
-        return "BUY"
-    elif short_avg < long_avg:
-        return "SELL"
-    return "HOLD"
+    short_term_window = 5
+    long_term_window = 20
 
+    if len(prices) < long_term_window:
+        return "HOLD"
+
+    short_sma = sum(prices[:short_term_window]) / short_term_window
+    long_sma = sum(prices[:long_term_window]) / long_term_window
+
+    if short_sma > long_sma:
+        return "BUY"
+    elif short_sma < long_sma:
+        return "SELL"
+    else:
+        return "HOLD"
+
+# Fetch data with timestamp freshness check
 def fetch_prices(symbol):
     url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1min&apikey={API_KEY}"
     try:
         response = requests.get(url, timeout=10)
         data = response.json()
-        if "values" in data:
-            prices = [float(x['close']) for x in data["values"][:20]]
-            return prices
+
+        if "values" not in data:
+            return None
+
+        latest_timestamp = data["values"][0]["datetime"]
+        latest_time = datetime.strptime(latest_timestamp, "%Y-%m-%d %H:%M:%S")
+
+        # Check if data is older than 5 minutes
+        if datetime.utcnow() - latest_time > timedelta(minutes=5):
+            return None
+
+        prices = [float(x['close']) for x in data["values"][:20]]
+        return prices
     except Exception:
-        pass
-    return None
+        return None
 
-def fetch_and_cache_data():
-    now = time.time()
-    if now - cache["timestamp"] < 120:
-        return
-
-    # Try EUR/USD
-    prices = fetch_prices("EUR/USD")
-    pair = "EUR/USD"
-
-    # Fallback to BTC/USD if EUR/USD is closed
-    if not prices:
-        prices = fetch_prices("BTC/USD")
-        pair = "BTC/USD"
-
-    if prices:
-        cache["prices"] = prices
-        cache["signal"] = calculate_signal(prices)
-        cache["price"] = prices[0]
-        cache["timestamp"] = now
-        cache["pair"] = pair
-    else:
-        cache["signal"] = "Error"
-        cache["price"] = "Unavailable"
-        cache["pair"] = "Unavailable"
+# Shared logic to determine symbol and get signal
+def get_valid_signal():
+    for symbol in ["EUR/USD", "BTC/USD"]:
+        prices = fetch_prices(symbol)
+        if prices:
+            signal = calculate_signal(prices)
+            return signal, symbol, prices
+    return "Error", "Unavailable", []
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    fetch_and_cache_data()
+    signal, symbol, prices = get_valid_signal()
+
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "signal": cache["signal"],
-        "pair": cache["pair"],
-        "price": cache["price"]
+        "signal": signal,
+        "pair": symbol,
+        "price": prices[0] if prices else "Unavailable"
     })
 
 @app.get("/signal")
 def get_signal():
-    fetch_and_cache_data()
+    signal, symbol, prices = get_valid_signal()
     return {
-        "signal": cache["signal"],
-        "pair": cache["pair"],
-        "data": cache["prices"]
+        "signal": signal,
+        "pair": symbol,
+        "data": prices
     }
 
 if __name__ == "__main__":
