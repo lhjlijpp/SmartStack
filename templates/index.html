@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Trading Signal</title>
+    <title>Forex Signal</title>
     <style>
       body {
         background-color: #121212;
@@ -23,14 +23,41 @@
       .sell {
         border: 2px solid red;
       }
+      .hold {
+        border: 2px solid yellow;
+      }
     </style>
+    <script>
+      // Polling for live data every 60 seconds
+      function fetchSignal() {
+        fetch('/signal')
+          .then(response => response.json())
+          .then(data => {
+            const signalBox = document.getElementById('signal-box');
+            const signalText = document.getElementById('signal-text');
+            const priceText = document.getElementById('price-text');
+
+            signalText.innerText = data.signal;
+            priceText.innerText = `Price: ${data.data[0]}`;
+            
+            signalBox.className = `signal-box ${data.signal.toLowerCase()}`;
+          })
+          .catch(err => console.error('Error fetching signal:', err));
+      }
+
+      // Call fetchSignal initially and then every 60 seconds
+      window.onload = function() {
+        fetchSignal();
+        setInterval(fetchSignal, 60000); // Every 60 seconds
+      };
+    </script>
   </head>
   <body>
     <h1>Forex Signal</h1>
-    <div class="signal-box {{ signal | lower }}">
-      <h2>{{ signal }}</h2>
-      <p>Pair: {{ pair }}</p>
-      <p>Price: {{ price }}</p>
+    <div id="signal-box" class="signal-box">
+      <h2 id="signal-text">{{ signal }}</h2>
+      <p id="pair-text">Pair: {{ pair }}</p>
+      <p id="price-text">Price: {{ price }}</p>
     </div>
   </body>
 </html>
