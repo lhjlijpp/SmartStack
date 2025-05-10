@@ -28,7 +28,6 @@
       }
     </style>
     <script>
-      // Polling for live data every 60 seconds
       function fetchSignal() {
         fetch('/signal')
           .then(response => response.json())
@@ -39,13 +38,12 @@
 
             signalText.innerText = data.signal;
             priceText.innerText = `Price: ${data.data[0]}`;
-            
+
             signalBox.className = `signal-box ${data.signal.toLowerCase()}`;
           })
           .catch(err => console.error('Error fetching signal:', err));
       }
 
-      // Call fetchSignal initially and then every 60 seconds
       window.onload = function() {
         fetchSignal();
         setInterval(fetchSignal, 60000); // Every 60 seconds
@@ -54,7 +52,7 @@
   </head>
   <body>
     <h1>Forex Signal</h1>
-    <div id="signal-box" class="signal-box">
+    <div id="signal-box" class="signal-box {{ signal | lower }}">
       <h2 id="signal-text">{{ signal }}</h2>
       <p id="pair-text">Pair: {{ pair }}</p>
       <p id="price-text">Price: {{ price }}</p>
