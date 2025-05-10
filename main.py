@@ -1,95 +1,69 @@
 import os
-import time
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 import requests
 import uvicorn
+import time
 
 app = FastAPI()
-
 templates = Jinja2Templates(directory="templates")
 
 API_KEY = os.getenv("TWELVE_API_KEY")
-CACHE_DURATION = 120  # seconds (2 minutes)
 
-# Cache variables
-last_fetch_time = 0
-cached_prices = []
-cached_signal = "HOLD"
+# In-memory cache
+cache = {
+    "timestamp": 0,
+    "signal": "HOLD",
+    "price": "Unavailable",
+    "prices": []
+}
 
+# SMA Strategy
 def calculate_signal(prices):
-    short_term_window = 5
-    long_term_window = 20
-
-    if len(prices) < long_term_window:
+    short = 5
+    long = 20
+    if len(prices) < long:
         return "HOLD"
-
-    short_term_sma = sum(prices[:short_term_window]) / short_term_window
-    long_term_sma = sum(prices[:long_term_window]) / long_term_window
-
-    if short_term_sma > long_term_sma:
+    short_avg = sum(prices[:short]) / short
+    long_avg = sum(prices[:long]) / long
+    if short_avg > long_avg:
         return "BUY"
-    elif short_term_sma < long_term_sma:
+    elif short_avg < long_avg:
         return "SELL"
-    else:
-        return "HOLD"
+    return "HOLD"
 
-def fetch_data(symbol="EUR/USD", interval="1min"):
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&apikey={API_KEY}"
+# API call with caching every 2 minutes
+def fetch_and_cache_data():
+    now = time.time()
+    if now - cache["timestamp"] < 120:
+        return  # Use cached data
+
+    url = f"https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=1min&apikey={API_KEY}"
     response = requests.get(url)
     data = response.json()
-    if "values" not in data:
-        return None
 
-    prices = [float(x['close']) for x in data["values"]]
-    return prices
-
-def get_cached_signal(symbol="EUR/USD", interval="1min"):
-    global last_fetch_time, cached_prices, cached_signal
-
-    now = time.time()
-    if now - last_fetch_time > CACHE_DURATION or not cached_prices:
-        prices = fetch_data(symbol, interval)
-        if prices is None:
-            return None, None
-
-        signal = calculate_signal(prices)
-        cached_prices = prices
-        cached_signal = signal
-        last_fetch_time = now
-
-    return cached_signal, cached_prices
+    if "values" in data:
+        prices = [float(x['close']) for x in data["values"][:20]]
+        cache["prices"] = prices
+        cache["signal"] = calculate_signal(prices)
+        cache["price"] = prices[0] if prices else "Unavailable"
+        cache["timestamp"] = now
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    symbol = "EUR/USD"
-    signal, prices = get_cached_signal(symbol)
-
-    if prices is None:
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "signal": "Error",
-            "pair": symbol,
-            "price": "Unavailable"
-        })
-
+    fetch_and_cache_data()
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "signal": signal,
-        "pair": symbol,
-        "price": prices[0]
+        "signal": cache["signal"],
+        "pair": "EUR/USD",
+        "price": cache["price"]
     })
 
 @app.get("/signal")
 def get_signal():
-    symbol = "EUR/USD"
-    signal, prices = get_cached_signal(symbol)
-
-    if prices is None:
-        return {"status": "error", "detail": "Could not fetch prices"}
-
-    return {"signal": signal, "data": prices}
+    fetch_and_cache_data()
+    return {"signal": cache["signal"], "data": cache["prices"]}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
